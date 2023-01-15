@@ -2,12 +2,43 @@
 #include <cstdlib>
 #include <vector>
 #include <cstring>
-#include <elf.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include "linklib.h"
+
+bool check_ehdr(Elf64_Ehdr* ehdr) {
+    if (!IS_ELF(*ehdr)) {
+        fprintf(stderr, "This is not ELF file.\n");
+        return false;
+    }
+    // TODO: add other checker.
+    return true;
+}
+
+//TODO
+void relocate_common_symbol(Elf64_Ehdr* ehdr) {
+
+}
+
+char* get_section_name(Elf64_Ehdr* ehdr, Elf64_Shdr* shdr) {
+    char* head = (char*)ehdr;
+    Elf64_Shdr *shstr = (Elf64_Shdr*)(head + ehdr->e_shoff + ehdr->e_shentsize * ehdr->e_shstrndx);
+    char* name = (char*)(head + shstr->sh_offset + shdr->sh_name);
+    return name;
+}
+
+//TODO
+Elf64_Shdr* get_section(Elf64_Ehdr* ehdr, const char* sh_name) {
+    char* head = (char*)ehdr;
+    for (int i = 0; i < ehdr->e_shnum; i++) {
+        Elf64_Shdr* shdr = (Elf64_Shdr*)(head + ehdr->e_shoff + ehdr->e_shentsize * i);
+        char* name = get_section_name(ehdr, shdr);
+        if (!strcmp(name, sh_name)) return shdr;
+    }
+    return nullptr;
+}
 
 void elfdump(char* head) {
     Elf64_Ehdr *ehdr = (Elf64_Ehdr*)head;

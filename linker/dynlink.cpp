@@ -1,33 +1,60 @@
 #include <cstdio>
-#include <cstdlib>
-#include <vector>
 #include <cstring>
+#include <vector>
 #include <elf.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <sys/stat.h>
-#include <sys/mman.h>
 #include "linklib.h"
 
+const int BUFSIZE = 64*1024;
+
 int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s obj-file\n", argv[0]);
+    if (argc < 3) {
+        fprintf(stderr, "Usage: %s func-name obj-file0 [obj-file1, ...]\n", argv[0]);
         return -1;
     }
 
-    int fd = open(argv[1], O_RDONLY);
-    if (fd < 0) {
-        fprintf(stderr, "cannot open %s\n", argv[1]);
-        return -1;
+    const char* funcname = argv[1];
+    static char buffer[BUFSIZE];
+    memset(buffer, 0, BUFSIZE);
+
+    // align by 4K
+    char* p = (char*)(((unsigned long long)buffer + 4095) & ~4095);
+
+    std::vector<Obj> objs;
+
+    for (int i = 2; i < argc; i++) {
+        Obj obj(p, argv[i]);
+        objs.push_back(std::move(obj));
+        FILE* fp = fopen(argv[i], "rb");
+        if (fp == NULL) {
+            fprintf(stderr, "cannot open %s\n", argv[i]);
+            continue;
+        }
+
+        printf("load %s at address 0x%llx\n", argv[i], (unsigned long long)p);
+        int c;
+        while((c = getc(fp)) != EOF) *(p++) = c;
+        fclose(fp);
+
+        p = (char*)(((unsigned long long)p + 15) & ~15);
+
+        if(!check_ehdr(objs.back().get_ehdr())) {
+            return -1;
+        }
+
+        relocate_common_symbol(objs.back().get_ehdr());
+
+        // prepare .bss space
+        //elfdump(objs.back().address);
+        Elf64_Shdr* bss = get_section(objs.back().get_ehdr(), ".bss");
+        if (bss != nullptr) {
+            printf("find .bss section and locate at address 0x%llx\n", (unsigned long long)p);
+            bss->sh_offset = (unsigned long long)(p - objs.back().address); 
+            memset(p, 0, bss->sh_size);
+            p += bss->sh_size;
+        }
+
+        p = (char*)(((unsigned long long)p + 15) & ~15);
     }
-    struct stat sb;
-    fstat(fd, &sb);
-    char* head = (char*)mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
-
-    elfdump(head);
-
-    munmap(head, sb.st_size);
-    close(fd);
 
     return 0;
 }
