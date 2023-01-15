@@ -1,6 +1,5 @@
 #include <cstdio>
 #include <cstdlib>
-#include <vector>
 #include <cstring>
 #include <fcntl.h>
 #include <unistd.h>
@@ -29,7 +28,6 @@ char* get_section_name(Elf64_Ehdr* ehdr, Elf64_Shdr* shdr) {
     return name;
 }
 
-//TODO
 Elf64_Shdr* get_section(Elf64_Ehdr* ehdr, const char* sh_name) {
     char* head = (char*)ehdr;
     for (int i = 0; i < ehdr->e_shnum; i++) {
@@ -38,6 +36,37 @@ Elf64_Shdr* get_section(Elf64_Ehdr* ehdr, const char* sh_name) {
         if (!strcmp(name, sh_name)) return shdr;
     }
     return nullptr;
+}
+
+std::vector<Elf64_Shdr*> get_shdrs(Elf64_Ehdr* ehdr) {
+    char* head = (char*)ehdr;
+    std::vector<Elf64_Shdr*> shdrs(ehdr->e_shnum);
+    for (int i = 0; i < ehdr->e_shnum; i++) {
+        shdrs[i] = (Elf64_Shdr*)(head + ehdr->e_shoff + ehdr->e_shentsize * i);
+    }
+    return shdrs;
+}
+
+Obj search_symbol(std::vector<Obj> objs, const char* name) {
+    for (auto& obj: objs) {
+        char* head = (char*)obj.address;
+        Elf64_Shdr* symtab = get_section((Elf64_Ehdr*)obj.address, ".symtab");
+        if (symtab == nullptr) continue;
+        for (unsigned int i = 0; i < symtab->sh_size / symtab->sh_entsize; i++) {
+            Elf64_Sym* sym = (Elf64_Sym*)(head + symtab->sh_offset + symtab->sh_entsize * i);
+            if (!sym->st_name) continue;
+            auto shdrs = get_shdrs((Elf64_Ehdr*)obj.address);
+            const char* sym_name = (const char*)(head + shdrs[symtab->sh_link]->sh_offset + sym->st_name);
+            if (!strcmp(name, sym_name)) {
+                char* addr = (char*)(head + shdrs[sym->st_shndx]->sh_offset + sym->st_value);
+                Obj ret(addr, obj.filename);
+                return ret;
+            }
+        }
+    }
+
+    Obj ret(nullptr, nullptr);
+    return ret;
 }
 
 void elfdump(char* head) {

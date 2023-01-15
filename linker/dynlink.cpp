@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
+#include <functional>
 #include <elf.h>
 #include "linklib.h"
 
@@ -41,10 +42,10 @@ int main(int argc, char* argv[]) {
             return -1;
         }
 
+        //TODO:
         relocate_common_symbol(objs.back().get_ehdr());
 
         // prepare .bss space
-        //elfdump(objs.back().address);
         Elf64_Shdr* bss = get_section(objs.back().get_ehdr(), ".bss");
         if (bss != nullptr) {
             printf("find .bss section and locate at address 0x%llx\n", (unsigned long long)p);
@@ -55,6 +56,18 @@ int main(int argc, char* argv[]) {
 
         p = (char*)(((unsigned long long)p + 15) & ~15);
     }
+
+    //link_objs(objs);
+    Obj obj = search_symbol(objs, funcname);
+    if (obj.address == nullptr) {
+        fprintf(stderr, "cannot find function %s\n", funcname);
+        return -1;
+    }
+    printf("found function %s at address 0x%llx\n", funcname, (unsigned long long)obj.address);
+    using f = int(*)();
+    auto func = (f)(obj.address);
+    int ret = func();
+    printf("ret = %d\n", ret);
 
     return 0;
 }
