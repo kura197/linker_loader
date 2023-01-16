@@ -57,7 +57,8 @@ int main(int argc, char* argv[]) {
         p = (char*)(((unsigned long long)p + 15) & ~15);
     }
 
-    //link_objs(objs);
+    elfdump(objs[0].address);
+    link_objs(objs);
     Obj obj = search_symbol(objs, funcname);
     if (obj.address == nullptr) {
         fprintf(stderr, "cannot find function %s\n", funcname);

@@ -47,7 +47,7 @@ std::vector<Elf64_Shdr*> get_shdrs(Elf64_Ehdr* ehdr) {
     return shdrs;
 }
 
-Obj search_symbol(std::vector<Obj> objs, const char* name) {
+Obj search_symbol(const std::vector<Obj>& objs, const char* name) {
     for (auto& obj: objs) {
         char* head = (char*)obj.address;
         Elf64_Shdr* symtab = get_section((Elf64_Ehdr*)obj.address, ".symtab");
@@ -67,6 +67,41 @@ Obj search_symbol(std::vector<Obj> objs, const char* name) {
 
     Obj ret(nullptr, nullptr);
     return ret;
+}
+
+void link_objs(const std::vector<Obj>& objs) {
+    for (auto& obj: objs) {
+        char* head = (char*)obj.address;
+        Elf64_Ehdr* ehdr = (Elf64_Ehdr*)head;
+        auto shdrs = get_shdrs(ehdr);
+        Elf64_Shdr* shdr = get_section(ehdr, ".rela.text");
+        Elf64_Shdr* symtab = shdrs[shdr->sh_link];
+        if (shdr == nullptr) {
+            fprintf(stderr, "cannot find section '.rela.text' in %s\n", obj.filename);
+            continue;
+        }
+        for (unsigned int i = 0; i < shdr->sh_size / shdr->sh_entsize; i++) {
+            Elf64_Rela* rela = (Elf64_Rela*)(head + shdr->sh_offset + shdr->sh_entsize * i);
+            Elf64_Sym* sym = (Elf64_Sym*)(head + symtab->sh_offset + symtab->sh_entsize * ELF64_R_SYM(rela->r_info));
+            char* sym_name = (char*)(head + shdrs[symtab->sh_link]->sh_offset + sym->st_name);
+            auto obj = search_symbol(objs, sym_name);
+            if (obj.address == nullptr) continue;
+            auto type = ELF64_R_TYPE(rela->r_info);
+            if (type == R_X86_64_PC32) {
+                // TODO:
+                unsigned long long tgt_addr = (unsigned long long)(obj.address + rela->r_addend);
+                unsigned long long sym_addr = (unsigned long long)(head + shdrs[sym->st_shndx]->sh_offset + rela->r_offset);
+                memcpy((char*)sym_addr, (char*)tgt_addr, 4);
+                printf("relocate %s at address 0x%llx point to 0x%llx\n", sym_name, sym_addr, tgt_addr);
+            } else if (type == R_X86_64_PLT32) {
+                // TODO:
+                unsigned long long tgt_addr = (unsigned long long)(obj.address + rela->r_addend);
+                unsigned long long sym_addr = (unsigned long long)(head + shdrs[sym->st_shndx]->sh_offset + rela->r_offset);
+                memcpy((char*)sym_addr, (char*)tgt_addr, 4);
+                printf("relocate %s at address 0x%llx point to 0x%llx\n", sym_name, sym_addr, tgt_addr);
+            }
+        }
+    }
 }
 
 void elfdump(char* head) {
