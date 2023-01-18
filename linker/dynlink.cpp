@@ -42,7 +42,6 @@ int main(int argc, char* argv[]) {
             return -1;
         }
 
-        //TODO:
         relocate_common_symbol(objs.back().get_ehdr());
 
         // prepare .bss space

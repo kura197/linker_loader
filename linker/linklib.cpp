@@ -16,9 +16,41 @@ bool check_ehdr(Elf64_Ehdr* ehdr) {
     return true;
 }
 
-//TODO
 void relocate_common_symbol(Elf64_Ehdr* ehdr) {
+    auto bss = get_section(ehdr, ".bss");
+    if (bss == nullptr) {
+        fprintf(stderr, "cannnot find .bss section\n");
+        return;
+    }
+    char* head = (char*)ehdr;
+    auto shdrs = get_shdrs(ehdr);
 
+    // get index of .bss section
+    auto get_bss_idx = [&] () {
+        for (unsigned int i = 0; i < shdrs.size(); i++) {
+            if (shdrs[i] == bss) return (int)i;
+        }
+        return -1;
+    };
+    const int bss_idx = get_bss_idx();
+
+    int bss_size = bss->sh_size;
+    for (auto& shdr: shdrs) {
+        if (shdr->sh_type != SHT_SYMTAB && shdr->sh_type != SHT_DYNSYM) continue;
+        for (unsigned int i = 0; i < shdr->sh_size / shdr->sh_entsize; i++) {
+            Elf64_Sym* sym = (Elf64_Sym*)(head + shdr->sh_offset + shdr->sh_entsize * i);
+            if (sym->st_shndx != SHN_COMMON) continue;
+            char* tgt_name = (char*)(head + shdrs[shdr->sh_link]->sh_offset + sym->st_name);
+            printf("find COMMON symbol %s\n", tgt_name);
+
+            bss_size = (bss_size + sym->st_value - 1) & ~(sym->st_value - 1);
+            sym->st_value = bss_size;
+            sym->st_shndx = bss_idx;
+        }
+    }
+
+    bss_size = (bss_size + 15) & ~15;
+    bss->sh_size = bss_size;
 }
 
 char* get_section_name(Elf64_Ehdr* ehdr, Elf64_Shdr* shdr) {
@@ -55,6 +87,7 @@ Obj search_symbol(const std::vector<Obj>& objs, const char* name) {
         for (unsigned int i = 0; i < symtab->sh_size / symtab->sh_entsize; i++) {
             Elf64_Sym* sym = (Elf64_Sym*)(head + symtab->sh_offset + symtab->sh_entsize * i);
             if (sym->st_shndx == SHN_UNDEF) continue;
+            if (sym->st_shndx == SHN_COMMON) continue;
             if (!sym->st_name) continue;
             auto shdrs = get_shdrs((Elf64_Ehdr*)obj.address);
             const char* sym_name = (const char*)(head + shdrs[symtab->sh_link]->sh_offset + sym->st_name);
@@ -79,10 +112,6 @@ void link_objs(const std::vector<Obj>& objs) {
         for (auto& shdr: shdrs) {
             if (shdr->sh_type != SHT_REL && shdr->sh_type != SHT_RELA) continue;
             Elf64_Shdr* symtab = shdrs[shdr->sh_link];
-            if (shdr == nullptr) {
-                fprintf(stderr, "cannot find section '.rela.text' in %s\n", obj.filename);
-                continue;
-            }
             for (unsigned int i = 0; i < shdr->sh_size / shdr->sh_entsize; i++) {
                 Elf64_Rela* rela = (Elf64_Rela*)(head + shdr->sh_offset + shdr->sh_entsize * i);
                 Elf64_Sym* sym = (Elf64_Sym*)(head + symtab->sh_offset + symtab->sh_entsize * ELF64_R_SYM(rela->r_info));
@@ -113,7 +142,6 @@ void link_objs(const std::vector<Obj>& objs) {
                     memcpy(tgt_addr, &wr_addr, 4);
                     printf("relocate %s at address 0x%llx point to 0x%llx\n", tgt_name, (unsigned long long)tgt_addr, (unsigned long long)sym_addr);
                 } else if (type == R_X86_64_PLT32) {
-                    printf("type = R_X86_64_PLT32\n");
                     int wr_addr = sym_addr - tgt_addr + rela->r_addend;
                     memcpy(tgt_addr, &wr_addr, 4);
                     printf("relocate %s at address 0x%llx point to 0x%llx\n", tgt_name, (unsigned long long)tgt_addr, (unsigned long long)sym_addr);
@@ -122,6 +150,7 @@ void link_objs(const std::vector<Obj>& objs) {
                 }
             }
         }
+        printf("\n");
     }
 }
 
