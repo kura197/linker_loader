@@ -54,6 +54,7 @@ Obj search_symbol(const std::vector<Obj>& objs, const char* name) {
         if (symtab == nullptr) continue;
         for (unsigned int i = 0; i < symtab->sh_size / symtab->sh_entsize; i++) {
             Elf64_Sym* sym = (Elf64_Sym*)(head + symtab->sh_offset + symtab->sh_entsize * i);
+            if (sym->st_shndx == SHN_UNDEF) continue;
             if (!sym->st_name) continue;
             auto shdrs = get_shdrs((Elf64_Ehdr*)obj.address);
             const char* sym_name = (const char*)(head + shdrs[symtab->sh_link]->sh_offset + sym->st_name);
@@ -86,44 +87,39 @@ void link_objs(const std::vector<Obj>& objs) {
                 Elf64_Rela* rela = (Elf64_Rela*)(head + shdr->sh_offset + shdr->sh_entsize * i);
                 Elf64_Sym* sym = (Elf64_Sym*)(head + symtab->sh_offset + symtab->sh_entsize * ELF64_R_SYM(rela->r_info));
                 char* tgt_name = nullptr;
+                char* tgt_addr = nullptr;
+                char* sym_addr = nullptr;
                 if (sym->st_shndx == SHN_UNDEF) {
                     tgt_name = (char*)(head + shdrs[symtab->sh_link]->sh_offset + sym->st_name);
                     auto obj = search_symbol(objs, tgt_name);
                     if (obj.address == nullptr) continue;
+                    sym_addr = obj.address;
+                    tgt_addr = head + shdrs[shdr->sh_info]->sh_offset + rela->r_offset;
                 } else if (sym->st_shndx == SHN_ABS || sym->st_shndx == SHN_COMMON) {
-                    //continue;
+                    continue;
                 } else {
                     auto tgt_shdr = shdrs[sym->st_shndx];
                     tgt_name = get_section_name(ehdr, tgt_shdr);
-                    char* addr = head + tgt_shdr->sh_offset + rela->r_addend;
-                    char* rel_addr = head + shdrs[shdr->sh_info]->sh_offset + rela->r_offset;
-
-                    auto type = ELF64_R_TYPE(rela->r_info);
-                    if (type == R_X86_64_PC32) {
-                        //printf("type = R_X86_64_PC32\n");
-                        int wr_addr = addr - rel_addr;
-                        memcpy(rel_addr, &wr_addr, 4);
-                        printf("relocate %s at address 0x%llx point to 0x%llx\n", tgt_name, (unsigned long long)rel_addr, (unsigned long long)addr);
-                    } else {
-                        fprintf(stderr, "ignore %s\n", tgt_name);
-                    }
+                    sym_addr = head + tgt_shdr->sh_offset;
+                    tgt_addr = head + shdrs[shdr->sh_info]->sh_offset + rela->r_offset;
                 }
 
-                //if (type == R_X86_64_PC32) {
-                //    printf("type = R_X86_64_PC32\n");
-                //    // TODO:
-                //    unsigned long long tgt_addr = (unsigned long long)(obj.address + rela->r_addend);
-                //    unsigned long long sym_addr = (unsigned long long)(head + shdrs[sym->st_shndx]->sh_offset + rela->r_offset);
-                //    memcpy((char*)sym_addr, (char*)tgt_addr, 8);
-                //    printf("relocate %s at address 0x%llx point to 0x%llx\n", tgt_name, sym_addr, tgt_addr);
-                //} else if (type == R_X86_64_PLT32) {
-                //    printf("type = R_X86_64_PLT32\n");
-                //    // TODO:
-                //    unsigned long long tgt_addr = (unsigned long long)(obj.address + rela->r_addend);
-                //    unsigned long long sym_addr = (unsigned long long)(head + shdrs[sym->st_shndx]->sh_offset + rela->r_offset);
-                //    memcpy((char*)sym_addr, (char*)tgt_addr, 8);
-                //    printf("relocate %s at address 0x%llx point to 0x%llx\n", tgt_name, sym_addr, tgt_addr);
-                //}
+                if (tgt_name == nullptr || tgt_addr == nullptr || sym_addr == nullptr) continue;
+
+                auto type = ELF64_R_TYPE(rela->r_info);
+                if (type == R_X86_64_PC32) {
+                    //printf("type = R_X86_64_PC32\n");
+                    int wr_addr = sym_addr - tgt_addr + rela->r_addend;
+                    memcpy(tgt_addr, &wr_addr, 4);
+                    printf("relocate %s at address 0x%llx point to 0x%llx\n", tgt_name, (unsigned long long)tgt_addr, (unsigned long long)sym_addr);
+                } else if (type == R_X86_64_PLT32) {
+                    printf("type = R_X86_64_PLT32\n");
+                    int wr_addr = sym_addr - tgt_addr + rela->r_addend;
+                    memcpy(tgt_addr, &wr_addr, 4);
+                    printf("relocate %s at address 0x%llx point to 0x%llx\n", tgt_name, (unsigned long long)tgt_addr, (unsigned long long)sym_addr);
+                } else {
+                    fprintf(stderr, "ignore %s\n", tgt_name);
+                }
             }
         }
     }
