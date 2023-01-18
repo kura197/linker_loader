@@ -137,7 +137,6 @@ void link_objs(const std::vector<Obj>& objs) {
 
                 auto type = ELF64_R_TYPE(rela->r_info);
                 if (type == R_X86_64_PC32) {
-                    //printf("type = R_X86_64_PC32\n");
                     int wr_addr = sym_addr - tgt_addr + rela->r_addend;
                     memcpy(tgt_addr, &wr_addr, 4);
                     printf("relocate %s at address 0x%llx point to 0x%llx\n", tgt_name, (unsigned long long)tgt_addr, (unsigned long long)sym_addr);

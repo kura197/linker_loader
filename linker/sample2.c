@@ -1,10 +1,8 @@
-#include <stdio.h>
-
-int extvalue = 20;
+int extvalue = 13579;
 int extbssvalue;
 
 int extfunc(int a, int b) {
-    printf("extfunc()\n");
     int ret = a + b;
+    extbssvalue = ret;
     return ret;
 }
