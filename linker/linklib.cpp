@@ -129,7 +129,7 @@ void link_objs(const std::vector<Obj>& objs) {
                 } else {
                     auto tgt_shdr = shdrs[sym->st_shndx];
                     tgt_name = get_section_name(ehdr, tgt_shdr);
-                    sym_addr = head + tgt_shdr->sh_offset;
+                    sym_addr = head + tgt_shdr->sh_offset + sym->st_value;
                     tgt_addr = head + shdrs[shdr->sh_info]->sh_offset + rela->r_offset;
                 }
 
