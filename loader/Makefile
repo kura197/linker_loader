@@ -6,7 +6,7 @@ CXXFLAGS := -Wall -g -O0 -fsanitize=address
 all: loader
 
 loader: loader.cpp
-	$(CXX) $< -o $@ $(CXXFLAGS) -Wl,-T $(PWD)/space.scr
+	$(CXX) $< -o $@ $(CXXFLAGS)
 
 clean:
 	rm loader
