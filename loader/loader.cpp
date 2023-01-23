@@ -10,6 +10,9 @@
 #include <errno.h>
 
 const uint64_t PAGE_SIZE = 4096;
+const int STACK_SIZE = 16 * PAGE_SIZE;
+const int STACK_PTR = 14 * PAGE_SIZE;
+const int STRING_PTR = 12 * PAGE_SIZE;
 
 #define IS_ELF(ehdr) (                   \
     ((ehdr).e_ident[EI_MAG0] == ELFMAG0) && \
@@ -95,7 +98,13 @@ char* load_files(char* head) {
     return entry;
 }
 
-int main(int argc, char* argv[]) {
+void get_random(char* addr, int size) {
+    int fd = open("/dev/urandom", O_RDONLY, 0);
+    read(fd, addr, size);
+    close(fd);
+}
+
+int main(int argc, char* argv[], char* envp[]) {
     if (argc != 2) {
         fprintf(stderr, "Usage: %s obj-file\n", argv[0]);
         return -1;
@@ -134,17 +143,62 @@ int main(int argc, char* argv[]) {
             return -1;
         }
         printf("%s Entry point: 0x%lx\n", interp, (uint64_t)entry);
+        munmap(elf_ld_head, sb.st_size);
+        close(fd);
+    }
+
+    char* stack = (char*)mmap(NULL, STACK_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANON, 0, 0);
+    char* stack_ptr = stack + STACK_PTR;
+    char* string_ptr = stack + STRING_PTR;
+
+    *stack_ptr-- = argc;
+    *stack_ptr-- = (uint64_t)string_ptr;
+    for (int i = 0; i < argc; i++) {
+        int size = strlen(argv[i]) + 1;
+        //printf("%s: %d\n", argv[i], size);
+        memcpy(string_ptr-size, argv[i], size);
+        string_ptr -= size;
+    }
+
+    *stack_ptr-- = (uint64_t)string_ptr;
+    for (int i = 0; envp[i] != NULL; i++) {
+        int size = strlen(envp[i]) + 1;
+        //printf("%s: %d\n", envp[i], size);
+        memcpy(string_ptr-size, envp[i], size);
+        string_ptr -= size;
+    }
+
+    // store random value
+    get_random((char*)(string_ptr-16), 16);
+    string_ptr -= 16;
+    char* ptr_rand = string_ptr;
+
+    std::vector<Elf64_auxv_t> auxvs;
+    auto ehdr = (Elf64_Ehdr*)head;
+    auxvs.push_back((Elf64_auxv_t){AT_PHDR,   (uint64_t)(head + ehdr->e_phoff)});
+    auxvs.push_back((Elf64_auxv_t){AT_PHENT,  sizeof(Elf64_Phdr)});
+    auxvs.push_back((Elf64_auxv_t){AT_PHNUM,  ehdr->e_phnum});
+    auxvs.push_back((Elf64_auxv_t){AT_PAGESZ, PAGE_SIZE});
+    auxvs.push_back((Elf64_auxv_t){AT_BASE,   (uint64_t)interp_entry});
+    auxvs.push_back((Elf64_auxv_t){AT_FLAGS,  0});
+    auxvs.push_back((Elf64_auxv_t){AT_ENTRY,  (uint64_t)entry});
+    auxvs.push_back((Elf64_auxv_t){AT_UID,    getuid()});
+    auxvs.push_back((Elf64_auxv_t){AT_EUID,   geteuid()});
+    auxvs.push_back((Elf64_auxv_t){AT_GID,    getgid()});
+    auxvs.push_back((Elf64_auxv_t){AT_EGID,   getegid()});
+    auxvs.push_back((Elf64_auxv_t){AT_RANDOM, (uint64_t)ptr_rand});
+    auxvs.push_back((Elf64_auxv_t){AT_NULL,   (uint64_t)NULL});
+
+    for (auto& auxv: auxvs) {
+        const size_t size = sizeof(Elf64_auxv_t);
+        memcpy(stack_ptr-size, &auxv, size);
+        stack_ptr -= size;
     }
 
     munmap(head, sb.st_size);
     close(fd);
 
-    //TODO: stack, arguments, aux vec
-
-    using ep = int(*)(int, char**, char**);
-    ep func = (interp_entry != nullptr) ? (ep)interp_entry : (ep)entry;
-    char* env[1] = {nullptr};
-    func(argc, argv, env);
+    // TODO: jmp to entry and set sp to STACK_PTR;
 
     return 0;
 }
