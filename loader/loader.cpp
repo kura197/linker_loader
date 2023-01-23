@@ -148,7 +148,7 @@ int main(int argc, char* argv[], char* envp[]) {
     }
 
     char* stack = (char*)mmap(NULL, STACK_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANON, 0, 0);
-    char* stack_ptr = stack + STACK_PTR;
+    uint64_t* stack_ptr = (uint64_t*)(stack + STACK_PTR);
     char* string_ptr = stack + STRING_PTR;
 
     *stack_ptr-- = argc;
@@ -158,7 +158,9 @@ int main(int argc, char* argv[], char* envp[]) {
         //printf("%s: %d\n", argv[i], size);
         memcpy(string_ptr-size, argv[i], size);
         string_ptr -= size;
+        *stack_ptr-- = (uint64_t)string_ptr;
     }
+    *stack_ptr-- = 0;
 
     *stack_ptr-- = (uint64_t)string_ptr;
     for (int i = 0; envp[i] != NULL; i++) {
@@ -166,7 +168,9 @@ int main(int argc, char* argv[], char* envp[]) {
         //printf("%s: %d\n", envp[i], size);
         memcpy(string_ptr-size, envp[i], size);
         string_ptr -= size;
+        *stack_ptr-- = (uint64_t)string_ptr;
     }
+    *stack_ptr-- = 0;
 
     // store random value
     get_random((char*)(string_ptr-16), 16);
@@ -198,7 +202,15 @@ int main(int argc, char* argv[], char* envp[]) {
     munmap(head, sb.st_size);
     close(fd);
 
-    // TODO: jmp to entry and set sp to STACK_PTR;
+    char* start = (interp_entry != nullptr) ? interp_entry : entry;
+    //asm volatile ("movq %0, %%rsp" :: "m"(stack + STACK_PTR));
+    //asm volatile ("jmp *%0" :: "m"(start));
+    // TODO: consider rdx to exit_func
+    register uint64_t rsp __asm__("rsp") = (uint64_t)(stack + STACK_PTR);
+    printf("jump to 0x%lx\n", (uint64_t)start);
+    asm volatile ("jmp *%0" :: "r"(start), "r"(rsp));
+    for (int i = 0; i < 100; i++)
+        asm volatile ("nop");
 
     return 0;
 }
