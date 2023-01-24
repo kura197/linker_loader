@@ -14,6 +14,16 @@ const int STACK_SIZE = 100 * PAGE_SIZE;
 const int STACK_PTR = 92 * PAGE_SIZE;
 const int STRING_PTR = 96 * PAGE_SIZE;
 
+void debug_test() {
+    ;
+}
+
+void debug_main(int argc, char* argv[], char* envp[]) {
+    printf("argc: %d\n", argc);
+    for (int i = 0; argv[i] != NULL; i++) printf("argv[%d]: %s\n", i, argv[i]);
+    for (int i = 0; envp[i] != NULL; i++) printf("envp[%d]: %s\n", i, argv[i]);
+}
+
 #define IS_ELF(ehdr) (                   \
     ((ehdr).e_ident[EI_MAG0] == ELFMAG0) && \
     ((ehdr).e_ident[EI_MAG1] == ELFMAG1) && \
@@ -42,6 +52,7 @@ char* get_interp_name(char* head) {
     return nullptr;
 }
 
+// TODO: zero init for .bss
 char* load_files(char* head) {
     Elf64_Ehdr *ehdr = (Elf64_Ehdr*)head;
     if (!IS_ELF(*ehdr)) {
@@ -138,7 +149,7 @@ int main(int argc, char* argv[], char* envp[]) {
         struct stat sb;
         fstat(fd, &sb);
         char* elf_ld_head = (char*)mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
-        char* interp_entry = load_files(elf_ld_head);
+        interp_entry = load_files(elf_ld_head);
         if (interp_entry == nullptr) {
             return -1;
         }
@@ -148,34 +159,34 @@ int main(int argc, char* argv[], char* envp[]) {
     }
 
     char* stack = (char*)mmap(NULL, STACK_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANON, 0, 0);
+    // TODO: check
     uint64_t* stack_ptr = (uint64_t*)(stack + STACK_PTR);
+    stack_ptr++;
     char* string_ptr = stack + STRING_PTR;
 
     *stack_ptr++ = argc;
-    *stack_ptr++ = (uint64_t)string_ptr;
     for (int i = 0; i < argc; i++) {
         int size = strlen(argv[i]) + 1;
         //printf("%s: %d\n", argv[i], size);
         memcpy(string_ptr, argv[i], size);
-        string_ptr += size;
         *stack_ptr++ = (uint64_t)string_ptr;
+        string_ptr += size;
     }
     *stack_ptr++ = 0;
 
-    *stack_ptr++ = (uint64_t)string_ptr;
     for (int i = 0; envp[i] != NULL; i++) {
         int size = strlen(envp[i]) + 1;
         //printf("%s: %d\n", envp[i], size);
         memcpy(string_ptr, envp[i], size);
-        string_ptr += size;
         *stack_ptr++ = (uint64_t)string_ptr;
+        string_ptr += size;
     }
     *stack_ptr++ = 0;
 
     // store random value
     get_random(string_ptr, 16);
-    string_ptr += 16;
     char* ptr_rand = string_ptr;
+    string_ptr += 16;
 
     std::vector<Elf64_auxv_t> auxvs;
     auto ehdr = (Elf64_Ehdr*)head;
@@ -203,16 +214,16 @@ int main(int argc, char* argv[], char* envp[]) {
     close(fd);
 
     char* start = (interp_entry != nullptr) ? interp_entry : entry;
+    //char* start = entry;
     //asm volatile ("movq %0, %%rsp" :: "m"(stack + STACK_PTR));
     //asm volatile ("jmp *%0" :: "m"(start));
     // TODO: consider rdx to exit_func
-    //register uint64_t rsp __asm__("rsp") = (uint64_t)(stack + STACK_PTR);
+    debug_test();
+    printf("*(stack + STACK_PTR) = %d\n", *(stack + STACK_PTR));
+    register uint64_t rsp __asm__("rsp") = (uint64_t)(stack + STACK_PTR);
     //printf("jump to 0x%lx\n", (uint64_t)start);
     //asm volatile("jmp *%0" :: "r"(start), "r"(rsp));
-    //for (int i = 0; i < 100; i++){
-    //    asm volatile("push   %rbp");
-    //    asm volatile("pop   %rbp");
-    //}
+    asm volatile("jmp *%0" :: "r"(debug_main), "r"(rsp));
 
     return 0;
 }
