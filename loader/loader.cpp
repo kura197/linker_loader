@@ -11,12 +11,8 @@
 
 const uint64_t PAGE_SIZE = 4096;
 const int STACK_SIZE = 400 * PAGE_SIZE;
-const int STACK_PTR = 200 * PAGE_SIZE;
-const int STRING_PTR = 300 * PAGE_SIZE;
-
-void debug_test() {
-    ;
-}
+const int STACK_PTR = 300 * PAGE_SIZE;
+const int STRING_PTR = 350 * PAGE_SIZE;
 
 #define IS_ELF(ehdr) (                   \
     ((ehdr).e_ident[EI_MAG0] == ELFMAG0) && \
@@ -188,41 +184,35 @@ int main(int argc, char* argv[], char* envp[]) {
 
     std::vector<Elf64_auxv_t> auxvs;
     auto ehdr = (Elf64_Ehdr*)head;
-    //auxvs.push_back((Elf64_auxv_t){AT_PHDR,   (uint64_t)(head + ehdr->e_phoff)});
-    //auxvs.push_back((Elf64_auxv_t){AT_PHENT,  sizeof(Elf64_Phdr)});
+    char* start = (interp_entry != nullptr) ? interp_entry : entry;
+
+    auxvs.push_back((Elf64_auxv_t){AT_PHDR,   (uint64_t)(head + ehdr->e_phoff)});
+    auxvs.push_back((Elf64_auxv_t){AT_PHENT,  sizeof(Elf64_Phdr)});
+    // TODO: SEGV
     //auxvs.push_back((Elf64_auxv_t){AT_PHNUM,  ehdr->e_phnum});
-    //auxvs.push_back((Elf64_auxv_t){AT_PAGESZ, PAGE_SIZE});
-    //auxvs.push_back((Elf64_auxv_t){AT_BASE,   (uint64_t)interp_base});
-    //auxvs.push_back((Elf64_auxv_t){AT_FLAGS,  0});
-    //auxvs.push_back((Elf64_auxv_t){AT_ENTRY,  (uint64_t)entry});
-    //auxvs.push_back((Elf64_auxv_t){AT_UID,    getuid()});
-    //auxvs.push_back((Elf64_auxv_t){AT_EUID,   geteuid()});
-    //auxvs.push_back((Elf64_auxv_t){AT_GID,    getgid()});
-    //auxvs.push_back((Elf64_auxv_t){AT_EGID,   getegid()});
+    auxvs.push_back((Elf64_auxv_t){AT_PAGESZ, PAGE_SIZE});
+    auxvs.push_back((Elf64_auxv_t){AT_BASE,   (uint64_t)interp_base});
+    auxvs.push_back((Elf64_auxv_t){AT_FLAGS,  0});
+    auxvs.push_back((Elf64_auxv_t){AT_ENTRY,  (uint64_t)start});
+    auxvs.push_back((Elf64_auxv_t){AT_UID,    getuid()});
+    auxvs.push_back((Elf64_auxv_t){AT_EUID,   geteuid()});
+    auxvs.push_back((Elf64_auxv_t){AT_GID,    getgid()});
+    auxvs.push_back((Elf64_auxv_t){AT_EGID,   getegid()});
     auxvs.push_back((Elf64_auxv_t){AT_RANDOM, (uint64_t)ptr_rand});
     auxvs.push_back((Elf64_auxv_t){AT_NULL,   (uint64_t)NULL});
 
-    for (auto& auxv: auxvs) {
-        const size_t size = sizeof(Elf64_auxv_t);
-        memcpy(stack_ptr, &auxv, size);
-        stack_ptr += size;
+    for (auto auxv: auxvs) {
+        *stack_ptr++ = auxv.a_type;
+        *stack_ptr++ = auxv.a_un.a_val;
     }
 
     munmap(head, sb.st_size);
     close(fd);
 
-    char* start = (interp_entry != nullptr) ? interp_entry : entry;
-    //char* start = entry;
-    //asm volatile ("movq %0, %%rsp" :: "m"(stack + STACK_PTR));
-    //asm volatile ("jmp *%0" :: "m"(start));
-    // TODO: consider rdx to exit_func
-    debug_test();
-
+    // TODO: consider rdx for exit_func
     printf("program start at 0x%lx\n", (uint64_t)start);
     printf("\n\n-------------------------------------\n\n");
-    //register uint64_t rsp __asm__("rsp") = (uint64_t)(stack + STACK_PTR);
     register uint64_t rsp __asm__("rsp") = (uint64_t)(stack + STACK_PTR);
-    //printf("jump to 0x%lx\n", (uint64_t)start);
     asm volatile("jmp *%0" :: "r"(start), "r"(rsp));
 
     return 0;

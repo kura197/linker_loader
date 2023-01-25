@@ -1,11 +1,11 @@
 
-CXXFLAGS := -Wall -g -O0 -fsanitize=address
+CFLAGS := -Wall -g -O0
 
 .PHONY: all clean
 
 all: elfdump
 
-elfdump: elfdump.cpp
+elfdump: elfdump.c
 
 clean:
 	rm elfdump

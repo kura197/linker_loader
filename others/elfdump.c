@@ -1,7 +1,6 @@
-#include <cstdio>
-#include <cstdlib>
-#include <vector>
-#include <cstring>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <elf.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -22,7 +21,8 @@ void elfdump(char* head) {
     }
 
     Elf64_Shdr *shstr = (Elf64_Shdr*)(head + ehdr->e_shoff + ehdr->e_shentsize * ehdr->e_shstrndx);
-    std::vector<Elf64_Shdr*> shdrs(ehdr->e_shnum);
+    //std::vector<Elf64_Shdr*> shdrs(ehdr->e_shnum);
+    Elf64_Shdr* shdrs[128];
     printf("Section:\n");
     printf("idx: name offset size\n");
     for (int i = 0; i < ehdr->e_shnum; i++) {
@@ -41,6 +41,7 @@ void elfdump(char* head) {
                      (phdr->p_type == PT_PHDR) ? "PT_PHDR" : "UNKNOWN";
         //printf("%d: %s 0x%x 0x%x |", i, type, (int)phdr->p_offset, (int)phdr->p_filesz);
         printf("%d: (%s) ", i, type);
+        printf("p_addr: %lx, v_addr: %lx\n", phdr->p_paddr, phdr->p_vaddr);
         for (int j = 0; j < ehdr->e_shnum; j++) {
             Elf64_Shdr *shdr = shdrs[j];
             int size = (shdr->sh_type != SHT_NOBITS) ? shdr->sh_size : 0;
