@@ -50,10 +50,10 @@ std::pair<char*, char*> load_files(char* head) {
         return std::make_pair(nullptr, nullptr);
     }
 
-    //if (ehdr->e_type != ET_DYN) {
-    //    fprintf(stderr, "only support PIE files.\n");
-    //    return nullptr;
-    //}
+    if (ehdr->e_type != ET_DYN) {
+        fprintf(stderr, "only support PIE files.\n");
+        return std::make_pair(nullptr, nullptr);
+    }
 
     uint64_t base_addr = -1;
     size_t top_addr = 0;
