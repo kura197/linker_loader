@@ -10,18 +10,12 @@
 #include <errno.h>
 
 const uint64_t PAGE_SIZE = 4096;
-const int STACK_SIZE = 100 * PAGE_SIZE;
-const int STACK_PTR = 92 * PAGE_SIZE;
-const int STRING_PTR = 96 * PAGE_SIZE;
+const int STACK_SIZE = 400 * PAGE_SIZE;
+const int STACK_PTR = 200 * PAGE_SIZE;
+const int STRING_PTR = 300 * PAGE_SIZE;
 
 void debug_test() {
     ;
-}
-
-void debug_main(int argc, char* argv[], char* envp[]) {
-    printf("argc: %d\n", argc);
-    for (int i = 0; argv[i] != NULL; i++) printf("argv[%d]: %s\n", i, argv[i]);
-    for (int i = 0; envp[i] != NULL; i++) printf("envp[%d]: %s\n", i, argv[i]);
 }
 
 #define IS_ELF(ehdr) (                   \
@@ -52,12 +46,12 @@ char* get_interp_name(char* head) {
     return nullptr;
 }
 
-// TODO: zero init for .bss
-char* load_files(char* head) {
+// return (base_addr, entry_addr)
+std::pair<char*, char*> load_files(char* head) {
     Elf64_Ehdr *ehdr = (Elf64_Ehdr*)head;
     if (!IS_ELF(*ehdr)) {
         fprintf(stderr, "This is not ELF file.\n");
-        return nullptr;
+        return std::make_pair(nullptr, nullptr);
     }
 
     //if (ehdr->e_type != ET_DYN) {
@@ -79,13 +73,15 @@ char* load_files(char* head) {
     uint64_t base_addr_align = round_down(base_addr, PAGE_SIZE);
     uint64_t top_addr_align = round_up(top_addr, PAGE_SIZE);
     //uint64_t base_offset = base_addr - base_addr_align;
+    printf("base_addr: 0x%lx, base_addr_align: 0x%lx\n", base_addr, base_addr_align);
 
     // TODO: fix prot (use mprotect for each ph?)
+    //size_t map_size = top_addr_align - base_addr_align;
     size_t map_size = top_addr_align - base_addr_align;
     char* map_head = (char*)mmap(&base_addr_align, map_size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANON, -1, 0);
     if (map_head == MAP_FAILED) {
         perror("mmap");
-        return nullptr;
+        return std::make_pair(nullptr, nullptr);
     }
     printf("Map head addr: 0x%lx, size: 0x%lx\n", (uint64_t)map_head, map_size);
 
@@ -95,18 +91,22 @@ char* load_files(char* head) {
         printf("load Segment %d\n", i);
         uint64_t vaddr = static_cast<uint64_t>(phdr->p_vaddr);
         size_t fsize = phdr->p_filesz;
+        size_t msize = phdr->p_memsz;
         printf("v_addr = 0x%lx, filesz = 0x%lx\n", vaddr, fsize);
         // TODO: support prot with mprotect
-        int prot = 0;
-        if (phdr->p_flags & PROT_READ) prot |= PROT_READ;
-        if (phdr->p_flags & PROT_WRITE) prot |= PROT_WRITE;
-        if (phdr->p_flags & PROT_EXEC) prot |= PROT_EXEC;
+        //int prot = 0;
+        //if (phdr->p_flags & PROT_READ) prot |= PROT_READ;
+        //if (phdr->p_flags & PROT_WRITE) prot |= PROT_WRITE;
+        //if (phdr->p_flags & PROT_EXEC) prot |= PROT_EXEC;
+        if (msize > fsize) {
+            memset(map_head + (vaddr - base_addr), 0, msize);
+        }
         memcpy(map_head + (vaddr - base_addr), head + phdr->p_offset, fsize);
-        printf("copy to 0x%lx\n", (uint64_t)(map_head + (vaddr - base_addr)));
+        printf("copy offset 0x%lx to 0x%lx\n", (uint64_t)(phdr->p_offset), (uint64_t)(map_head + (vaddr - base_addr)));
     }
 
     char* entry = map_head + (ehdr->e_entry - base_addr);
-    return entry;
+    return std::make_pair(map_head, entry);
 }
 
 void get_random(char* addr, int size) {
@@ -116,11 +116,6 @@ void get_random(char* addr, int size) {
 }
 
 int main(int argc, char* argv[], char* envp[]) {
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s obj-file\n", argv[0]);
-        return -1;
-    }
-
     int fd = open(argv[1], O_RDONLY);
     if (fd < 0) {
         fprintf(stderr, "cannot open %s\n", argv[1]);
@@ -130,13 +125,14 @@ int main(int argc, char* argv[], char* envp[]) {
     fstat(fd, &sb);
     char* head = (char*)mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
 
-    char* entry = load_files(head);
+    auto [base_addr, entry] = load_files(head);
     if (entry == nullptr) {
         return -1;
     }
     printf("%s Entry point: 0x%lx\n", argv[1], (uint64_t)entry);
 
     char* interp = get_interp_name(head);
+    char* interp_base = nullptr;
     char* interp_entry = nullptr;
     if (interp != nullptr) {
         printf("find interpreter %s.\n", interp);
@@ -149,7 +145,8 @@ int main(int argc, char* argv[], char* envp[]) {
         struct stat sb;
         fstat(fd, &sb);
         char* elf_ld_head = (char*)mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
-        interp_entry = load_files(elf_ld_head);
+        auto ret = load_files(elf_ld_head);
+        interp_base = ret.first, interp_entry = ret.second;
         if (interp_entry == nullptr) {
             return -1;
         }
@@ -158,10 +155,11 @@ int main(int argc, char* argv[], char* envp[]) {
         close(fd);
     }
 
+    // TODO: consider argument memory size
+    // TODO: consider register arguments for x64
     char* stack = (char*)mmap(NULL, STACK_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANON, 0, 0);
-    // TODO: check
+    memset(stack, 0, STACK_SIZE);
     uint64_t* stack_ptr = (uint64_t*)(stack + STACK_PTR);
-    stack_ptr++;
     char* string_ptr = stack + STRING_PTR;
 
     *stack_ptr++ = argc;
@@ -190,17 +188,17 @@ int main(int argc, char* argv[], char* envp[]) {
 
     std::vector<Elf64_auxv_t> auxvs;
     auto ehdr = (Elf64_Ehdr*)head;
-    auxvs.push_back((Elf64_auxv_t){AT_PHDR,   (uint64_t)(head + ehdr->e_phoff)});
-    auxvs.push_back((Elf64_auxv_t){AT_PHENT,  sizeof(Elf64_Phdr)});
-    auxvs.push_back((Elf64_auxv_t){AT_PHNUM,  ehdr->e_phnum});
-    auxvs.push_back((Elf64_auxv_t){AT_PAGESZ, PAGE_SIZE});
-    auxvs.push_back((Elf64_auxv_t){AT_BASE,   (uint64_t)interp_entry});
-    auxvs.push_back((Elf64_auxv_t){AT_FLAGS,  0});
-    auxvs.push_back((Elf64_auxv_t){AT_ENTRY,  (uint64_t)entry});
-    auxvs.push_back((Elf64_auxv_t){AT_UID,    getuid()});
-    auxvs.push_back((Elf64_auxv_t){AT_EUID,   geteuid()});
-    auxvs.push_back((Elf64_auxv_t){AT_GID,    getgid()});
-    auxvs.push_back((Elf64_auxv_t){AT_EGID,   getegid()});
+    //auxvs.push_back((Elf64_auxv_t){AT_PHDR,   (uint64_t)(head + ehdr->e_phoff)});
+    //auxvs.push_back((Elf64_auxv_t){AT_PHENT,  sizeof(Elf64_Phdr)});
+    //auxvs.push_back((Elf64_auxv_t){AT_PHNUM,  ehdr->e_phnum});
+    //auxvs.push_back((Elf64_auxv_t){AT_PAGESZ, PAGE_SIZE});
+    //auxvs.push_back((Elf64_auxv_t){AT_BASE,   (uint64_t)interp_base});
+    //auxvs.push_back((Elf64_auxv_t){AT_FLAGS,  0});
+    //auxvs.push_back((Elf64_auxv_t){AT_ENTRY,  (uint64_t)entry});
+    //auxvs.push_back((Elf64_auxv_t){AT_UID,    getuid()});
+    //auxvs.push_back((Elf64_auxv_t){AT_EUID,   geteuid()});
+    //auxvs.push_back((Elf64_auxv_t){AT_GID,    getgid()});
+    //auxvs.push_back((Elf64_auxv_t){AT_EGID,   getegid()});
     auxvs.push_back((Elf64_auxv_t){AT_RANDOM, (uint64_t)ptr_rand});
     auxvs.push_back((Elf64_auxv_t){AT_NULL,   (uint64_t)NULL});
 
@@ -219,11 +217,13 @@ int main(int argc, char* argv[], char* envp[]) {
     //asm volatile ("jmp *%0" :: "m"(start));
     // TODO: consider rdx to exit_func
     debug_test();
-    printf("*(stack + STACK_PTR) = %d\n", *(stack + STACK_PTR));
+
+    printf("program start at 0x%lx\n", (uint64_t)start);
+    printf("\n\n-------------------------------------\n\n");
+    //register uint64_t rsp __asm__("rsp") = (uint64_t)(stack + STACK_PTR);
     register uint64_t rsp __asm__("rsp") = (uint64_t)(stack + STACK_PTR);
     //printf("jump to 0x%lx\n", (uint64_t)start);
-    //asm volatile("jmp *%0" :: "r"(start), "r"(rsp));
-    asm volatile("jmp *%0" :: "r"(debug_main), "r"(rsp));
+    asm volatile("jmp *%0" :: "r"(start), "r"(rsp));
 
     return 0;
 }

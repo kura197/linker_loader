@@ -1,5 +1,5 @@
 
-CXXFLAGS := -Wall -g -O0 -fsanitize=address
+CXXFLAGS := -Wall -g -O0 -fsanitize=address -std=c++17
 
 .PHONY: all clean
 
